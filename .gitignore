@@ -1,0 +1,5 @@
+build/
+.qtcreator/
+CMakeLists.txt.user*
+*.bak
+__pycache__/
