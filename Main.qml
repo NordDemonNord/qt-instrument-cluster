@@ -11,13 +11,32 @@ Window {
     // Oxanium — шрифт цифр скорости и передачи.
     FontLoader { id: oxanium; source: "assets/fonts/Oxanium.ttf" }
 
-    // Поле экрана приборки по центру.
-    // Пропорции исходного SVG (1418×1028).
+    // Поле приборки. Внутри всё размечено в координатах panel.svg
+    // (1418×1028), но сам рисунок занимает только часть холста.
+    // Масштабируем так, чтобы в окно вписалась именно видимая часть
+    // (crop), а не весь холст с пустыми полями. Масштаб одинаковый по
+    // обеим осям, поэтому круги шкал остаются кругами.
     Item {
             id: cluster
-            anchors.centerIn: parent
-            width: Math.min(parent.width, parent.height * (1418 / 1028))
-            height: width * (1028 / 1418)
+
+            // Видимая часть panel.svg в координатах SVG:
+            // bounding box рисунка (323..1101 × 301..590) плюс поля 10 px.
+            readonly property real cropX: 313
+            readonly property real cropY: 291
+            readonly property real cropW: 798
+            readonly property real cropH: 309
+
+            // Во сколько раз увеличить SVG, чтобы crop целиком влез в окно.
+            readonly property real fitScale: Math.min(parent.width / cropW,
+                                                      parent.height / cropH)
+
+            // Весь холст SVG в этом масштабе...
+            width: 1418 * fitScale
+            height: 1028 * fitScale
+            // ...сдвинутый так, чтобы crop оказался по центру окна.
+            // Пустые поля холста уходят за края окна.
+            x: (parent.width  - cropW * fitScale) / 2 - cropX * fitScale
+            y: (parent.height - cropH * fitScale) / 2 - cropY * fitScale
 
         // Центры чёрных хабов (path188-3 / ellipse191 в panel.svg).
         readonly property real hubCenterYSvg: 447.21094
