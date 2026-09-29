@@ -89,6 +89,9 @@ void VehicleDataReceiver::updateDemo()
     setFuelLevel(qRound(100.0 * wave(30.0)));        // 0..100 % за 30 с
     setExternalTemp(qRound(-20.0 + 50.0 * wave(60.0)));
     setOdometer(123456 + static_cast<int>(t));       // +1 км в секунду
+    setTrip(2340 + static_cast<int>(t * 10.0));      // десятые км: +1 км в секунду
+    setHours(18);
+    setMinutes(static_cast<int>(t / 60.0) % 60);     // «часы» идут, 1 мин = 1 мин
     setGear(static_cast<int>(t / 3.0) % 5);          // P R N D M, по 3 с
 
     // Сигнализаторы: 2 с горят, 2 с не горят.
@@ -122,7 +125,8 @@ void VehicleDataReceiver::setAllTellTales(bool on)
     setFlag(m_oilPressure,   on, &VehicleDataReceiver::oilPressureChanged);
     setFlag(m_overheat,      on, &VehicleDataReceiver::overheatChanged);
     setFlag(m_absFault,      on, &VehicleDataReceiver::absFaultChanged);
-    setFlag(m_espActive,     on, &VehicleDataReceiver::espActiveChanged);
+    setFlag(m_espFault,      on, &VehicleDataReceiver::espFaultChanged);
+    setFlag(m_espBlink,      on, &VehicleDataReceiver::espBlinkChanged);
     setFlag(m_espOff,        on, &VehicleDataReceiver::espOffChanged);
     setFlag(m_brakeFault,    on, &VehicleDataReceiver::brakeFaultChanged);
     setFlag(m_steeringFault, on, &VehicleDataReceiver::steeringFaultChanged);
@@ -190,8 +194,14 @@ void VehicleDataReceiver::onReplyFinished(QNetworkReply *reply)
         int v = obj.value("gear").toInt();
         if (v != kNoDataU8) setGear(v);
     }
-    if (obj.contains("cruise")) {
-        setCruiseSpeed(obj.value("cruise").toInt());
+    if (obj.contains("trip")) {
+        setTrip(obj.value("trip").toInt());
+    }
+    if (obj.contains("hours")) {
+        setHours(obj.value("hours").toInt());
+    }
+    if (obj.contains("minutes")) {
+        setMinutes(obj.value("minutes").toInt());
     }
 
     // --- Сигнализаторы кузова/света (0x600) ---
@@ -218,7 +228,8 @@ void VehicleDataReceiver::onReplyFinished(QNetworkReply *reply)
     flag("oilPressure",   m_oilPressure,   [this](bool v){ m_oilPressure = v;   emit oilPressureChanged(); });
     flag("overheat",      m_overheat,      [this](bool v){ m_overheat = v;      emit overheatChanged(); });
     flag("absFault",      m_absFault,      [this](bool v){ m_absFault = v;      emit absFaultChanged(); });
-    flag("espActive",     m_espActive,     [this](bool v){ m_espActive = v;     emit espActiveChanged(); });
+    flag("espFault",      m_espFault,      [this](bool v){ m_espFault = v;      emit espFaultChanged(); });
+    flag("espBlink",      m_espBlink,      [this](bool v){ m_espBlink = v;      emit espBlinkChanged(); });
     flag("espOff",        m_espOff,        [this](bool v){ m_espOff = v;        emit espOffChanged(); });
     flag("brakeFault",    m_brakeFault,    [this](bool v){ m_brakeFault = v;    emit brakeFaultChanged(); });
     flag("steeringFault", m_steeringFault, [this](bool v){ m_steeringFault = v; emit steeringFaultChanged(); });
@@ -279,11 +290,25 @@ void VehicleDataReceiver::setGear(int v)
     emit gearChanged();
 }
 
-void VehicleDataReceiver::setCruiseSpeed(int v)
+void VehicleDataReceiver::setTrip(int v)
 {
-    if (m_cruiseSpeed == v) return;
-    m_cruiseSpeed = v;
-    emit cruiseSpeedChanged();
+    if (m_trip == v) return;
+    m_trip = v;
+    emit tripChanged();
+}
+
+void VehicleDataReceiver::setHours(int v)
+{
+    if (m_hours == v) return;
+    m_hours = v;
+    emit hoursChanged();
+}
+
+void VehicleDataReceiver::setMinutes(int v)
+{
+    if (m_minutes == v) return;
+    m_minutes = v;
+    emit minutesChanged();
 }
 
 void VehicleDataReceiver::setConnected(bool v)

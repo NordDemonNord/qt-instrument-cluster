@@ -21,8 +21,14 @@ Image {
     // Угол на шкале (Canvas: 0° = вправо, по часовой) в положении minValue.
     property real dialZeroAngle: 149.48
 
+    // Значение, зажатое в пределах шкалы: стрелка не уходит за деления.
+    // Реальное значение (например скорость 300) продолжает отображаться цифрой,
+    // а стрелка остаётся в крайнем положении maxValue.
+    readonly property real clampedValue:
+        Math.max(minValue, Math.min(maxValue, value))
+
     readonly property real rotationDeg:
-        (value - minValue) / (maxValue - minValue) * sweepAngle
+        (clampedValue - minValue) / (maxValue - minValue) * sweepAngle
 
     readonly property real dialAngle: dialZeroAngle + rotationDeg
 

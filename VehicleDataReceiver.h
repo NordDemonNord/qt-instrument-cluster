@@ -28,7 +28,9 @@ class VehicleDataReceiver : public QObject
     Q_PROPERTY(int odometer     READ odometer     NOTIFY odometerChanged)
     Q_PROPERTY(int fuelLevel    READ fuelLevel    NOTIFY fuelLevelChanged)
     Q_PROPERTY(int gear         READ gear         NOTIFY gearChanged)
-    Q_PROPERTY(int cruiseSpeed  READ cruiseSpeed  NOTIFY cruiseSpeedChanged)
+    Q_PROPERTY(int trip         READ trip         NOTIFY tripChanged)
+    Q_PROPERTY(int hours        READ hours        NOTIFY hoursChanged)
+    Q_PROPERTY(int minutes      READ minutes      NOTIFY minutesChanged)
 
     // --- Сигнализаторы кузова и света (0x600) ---
     Q_PROPERTY(bool turnLeft    READ turnLeft    NOTIFY turnLeftChanged)
@@ -48,7 +50,8 @@ class VehicleDataReceiver : public QObject
     Q_PROPERTY(bool oilPressure READ oilPressure NOTIFY oilPressureChanged)
     Q_PROPERTY(bool overheat    READ overheat    NOTIFY overheatChanged)
     Q_PROPERTY(bool absFault    READ absFault    NOTIFY absFaultChanged)
-    Q_PROPERTY(bool espActive   READ espActive   NOTIFY espActiveChanged)
+    Q_PROPERTY(bool espFault    READ espFault    NOTIFY espFaultChanged)
+    Q_PROPERTY(bool espBlink    READ espBlink    NOTIFY espBlinkChanged)
     Q_PROPERTY(bool espOff      READ espOff      NOTIFY espOffChanged)
     Q_PROPERTY(bool brakeFault  READ brakeFault  NOTIFY brakeFaultChanged)
     Q_PROPERTY(bool steeringFault READ steeringFault NOTIFY steeringFaultChanged)
@@ -73,7 +76,9 @@ public:
     int odometer()     const { return m_odometer; }
     int fuelLevel()    const { return m_fuelLevel; }
     int gear()         const { return m_gear; }
-    int cruiseSpeed()  const { return m_cruiseSpeed; }
+    int trip()    const { return m_trip; }      // в десятых км
+    int hours()   const { return m_hours; }
+    int minutes() const { return m_minutes; }
 
     bool turnLeft()  const { return m_turnLeft; }
     bool turnRight() const { return m_turnRight; }
@@ -91,7 +96,8 @@ public:
     bool oilPressure()   const { return m_oilPressure; }
     bool overheat()      const { return m_overheat; }
     bool absFault()      const { return m_absFault; }
-    bool espActive()     const { return m_espActive; }
+    bool espFault()      const { return m_espFault; }
+    bool espBlink()      const { return m_espBlink; }
     bool espOff()        const { return m_espOff; }
     bool brakeFault()    const { return m_brakeFault; }
     bool steeringFault() const { return m_steeringFault; }
@@ -112,7 +118,9 @@ signals:
     void odometerChanged();
     void fuelLevelChanged();
     void gearChanged();
-    void cruiseSpeedChanged();
+    void tripChanged();
+    void hoursChanged();
+    void minutesChanged();
 
     void turnLeftChanged();
     void turnRightChanged();
@@ -130,7 +138,8 @@ signals:
     void oilPressureChanged();
     void overheatChanged();
     void absFaultChanged();
-    void espActiveChanged();
+    void espFaultChanged();
+    void espBlinkChanged();
     void espOffChanged();
     void brakeFaultChanged();
     void steeringFaultChanged();
@@ -170,7 +179,9 @@ private:
     void setOdometer(int v);
     void setFuelLevel(int v);
     void setGear(int v);
-    void setCruiseSpeed(int v);
+    void setTrip(int v);
+    void setHours(int v);
+    void setMinutes(int v);
     void setConnected(bool v);
 
     QString m_sourceName;
@@ -191,7 +202,9 @@ private:
     int m_odometer     = 0;
     int m_fuelLevel    = 0;
     int m_gear         = 0;   // 0=P,1=R,2=N,3=D,4=M
-    int m_cruiseSpeed  = 0;
+    int m_trip    = 0;   // десятые км
+    int m_hours   = 0;
+    int m_minutes = 0;
 
     // Сигнализаторы
     bool m_turnLeft  = false;
@@ -210,7 +223,8 @@ private:
     bool m_oilPressure   = false;
     bool m_overheat      = false;
     bool m_absFault      = false;
-    bool m_espActive     = false;
+    bool m_espFault      = false;
+    bool m_espBlink      = false;
     bool m_espOff        = false;
     bool m_brakeFault    = false;
     bool m_steeringFault = false;

@@ -2,7 +2,7 @@ import QtQuick
 
 Window {
     width: 1920
-    height: 1080
+    height: 720
     visibility: Window.FullScreen
     visible: true
     title: qsTr("Lada Vesta NG — приборная панель")
@@ -44,17 +44,17 @@ Window {
         readonly property real tachHubXSvg: 481.32196
 
         // Статичная приборка (иконки, деления, рамки; без цифр над шкалами — они в QML).
-        Image {
-            id: screen
-            z: 0
-            anchors.fill: parent
-            source: "assets/panel.svg"
-            sourceSize: Qt.size(width, height)
-            fillMode: Image.PreserveAspectFit
-            smooth: true
-            layer.enabled: true
-            layer.smooth: true
-        }
+            Image {
+                            id: screen
+                            z: 0
+                            anchors.fill: parent
+                            source: "assets/panel.svg"
+                            sourceSize: Qt.size(width, height)
+                            fillMode: Image.PreserveAspectFit
+                            smooth: true
+                            layer.enabled: true
+                            layer.smooth: true
+                        }
 
         // Интерактивные шкалы — между panel.svg и цифрами.
         BarGauge {
@@ -170,8 +170,10 @@ Window {
             centerYOffsetSvg: 1.5
             iconSource: "assets/icons/esp.svg"
             iconSizeSvg: cluster.tellTaleIconSizeSvg
-            active: VehicleData.espActive
-            blinking: true
+            // Горит при неисправности (0x242) или мигает при срабатывании (стенд).
+            // Приоритет у неисправности: если espFault — горит ровно, не мигает.
+            active: VehicleData.espFault || VehicleData.espBlink
+            blinking: VehicleData.espBlink && !VehicleData.espFault
             color: "#f5b800"
         }
         TellTaleIndicator {
@@ -436,8 +438,10 @@ Window {
         readonly property real warningStripLabelFontSvg: 10.5
         readonly property color warningRedColor: "#e31e24"
         readonly property color warningAmberColor: "#f5b800"
+        // Надписи борткомпьютера. Порядок совпадает с индикаторами #1..#10,
+        // видимость каждой завязана на свой сигнал (см. Repeater ниже).
         readonly property var warningStripLabels: [
-            { centerYSvg: 384.5, text: "Неисправность усилителя руля" },
+            { centerYSvg: 384.5,  text: "Неисправность усилителя руля" },
             { centerYSvg: 400.65, text: "Неисправность тормозной системы" },
             { centerYSvg: 417.95, text: "Неисправность системы ABS" },
             { centerYSvg: 435.40, text: "Включён стояночный тормоз" },
@@ -445,6 +449,18 @@ Window {
             { centerYSvg: 469.75, text: "Неисправность двигателя" },
             { centerYSvg: 486.23, text: "Перегрев охлаждающей жидкости" },
             { centerYSvg: 504.96, text: "Низкий уровень топлива в баке" }
+        ]
+
+        // Активность надписей — отдельным списком, чтобы биндинги были реактивными.
+        readonly property var warningStripActive: [
+            VehicleData.steeringFault,
+            VehicleData.brakeFault,
+            VehicleData.absFault,
+            VehicleData.parkBrake,
+            VehicleData.airbagFault,
+            VehicleData.checkEngine,
+            VehicleData.overheat,
+            VehicleData.fuelLow
         ]
 
         // №20 правый поворотник
@@ -479,11 +495,8 @@ Window {
             color: "#00a000"
         }
 
-        property real totalOdometerKm: 23409
+        // Буква счётчика трипа (A/B) — переключается в самой приборке.
         property string tripCounter: "A"
-        property real tripOdometerKm: 234.0
-        property real outdoorTempC: 8
-        property string clockTimeText: "18:00"
 
         // Подписи над шкалами ОЖ (50 / 90 / 130) и топлива (0 / 1/2 / 1).
         ScaleGaugeLabel {
@@ -597,7 +610,7 @@ Window {
             centerYSvg: cluster.mileageLabelYSvg
             fontSizeSvg: cluster.readoutFontSvg
             gapSvg: cluster.readoutUnitGapSvg
-            valueText: cluster.tripCounter + " " + cluster.tripOdometerKm.toFixed(1)
+            valueText: cluster.tripCounter + " " + (VehicleData.trip / 10).toFixed(1)
         }
         MileageReadout {
             z: 2
@@ -620,13 +633,14 @@ Window {
             centerYSvg: cluster.clockTimeCenterYSvg
             fontSizeSvg: cluster.readoutFontSvg
             horizontalAnchor: "center"
-            text: cluster.clockTimeText
+            text: VehicleData.hours + ":" + (VehicleData.minutes < 10 ? "0" : "") + VehicleData.minutes
         }
 
         Repeater {
             model: cluster.warningStripLabels
             delegate: ScaleGaugeLabel {
                 required property var modelData
+                required property int index
                 z: 20
                 panelWidth: cluster.width
                 panelHeight: cluster.height
@@ -638,6 +652,8 @@ Window {
                 horizontalAnchor: "left"
                 textColor: cluster.warningStripLabelColor
                 text: modelData.text
+                // Надпись видна только когда горит её индикатор.
+                visible: cluster.warningStripActive[index] === true
             }
         }
 
