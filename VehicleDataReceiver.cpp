@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <QNetworkRequest>
 #include <QUrl>
+#include <QtMath>
 
 namespace {
 // Адрес ESP32 в режиме SoftAP
@@ -14,11 +15,33 @@ constexpr int kPollIntervalMs = 100;   // опрашивать 10 раз в се
 // сигнал невалиден, значение не обновляем (оставляем последнее валидное).
 constexpr int kNoDataU16 = 65535;
 constexpr int kNoDataU8  = 255;
+
+// Частота обновления demo-данных: ~30 кадров в секунду.
+constexpr int kDemoIntervalMs = 33;
 }
 
 VehicleDataReceiver::VehicleDataReceiver(QObject *parent)
     : QObject(parent)
 {
+    // По умолчанию - http, чтобы проекты, которые не знают про эту
+    // переменную, продолжали работать как раньше.
+    const QString source = qEnvironmentVariable("VEHICLE_DATA_SOURCE", "http").toLower();
+
+    if (source == QLatin1String("demo")) {
+        startDemoSource();
+    } else {
+        if (source != QLatin1String("http")) {
+            qWarning() << "VehicleDataReceiver: unknown VEHICLE_DATA_SOURCE" << source
+                       << "- falling back to http";
+        }
+        startHttpSource();
+    }
+}
+
+void VehicleDataReceiver::startHttpSource()
+{
+    m_sourceName = QStringLiteral("ESP32");
+
     connect(&m_network, &QNetworkAccessManager::finished,
             this, &VehicleDataReceiver::onReplyFinished);
 
@@ -27,8 +50,87 @@ VehicleDataReceiver::VehicleDataReceiver(QObject *parent)
 
     m_pollTimer.start(kPollIntervalMs);
 
-    qInfo() << "VehicleDataReceiver: polling" << kEspUrl
+    qInfo() << "VehicleDataReceiver: source = http, polling" << kEspUrl
             << "every" << kPollIntervalMs << "ms";
+}
+
+void VehicleDataReceiver::startDemoSource()
+{
+    m_sourceName = QStringLiteral("DEMO");
+
+    connect(&m_demoTimer, &QTimer::timeout,
+            this, &VehicleDataReceiver::updateDemo);
+
+    m_demoClock.start();
+    m_demoTimer.start(kDemoIntervalMs);
+
+    // Данные генерируются локально - "связь" есть всегда.
+    setConnected(true);
+
+    qInfo() << "VehicleDataReceiver: source = demo, update every"
+            << kDemoIntervalMs << "ms";
+}
+
+void VehicleDataReceiver::updateDemo()
+{
+    // Время с запуска в секундах - из него считаются все значения.
+    const double t = m_demoClock.elapsed() / 1000.0;
+
+    // Плавная волна 0..1..0 с заданным периодом.
+    // cos() даёт 1..-1..1, поэтому (1 - cos) / 2 начинается с 0 -
+    // стрелки стартуют с нуля, как при включении зажигания.
+    auto wave = [t](double periodSec) {
+        return (1.0 - qCos(2.0 * M_PI * t / periodSec)) / 2.0;
+    };
+
+    setSpeed(qRound(220.0 * wave(10.0)));            // 0..220 км/ч за 10 с
+    setRpm(qRound(800.0 + 6200.0 * wave(4.0)));      // 800..7000 об/мин за 4 с
+    setCoolant(qRound(50.0 + 80.0 * wave(20.0)));    // 50..130 °C за 20 с
+    setFuelLevel(qRound(100.0 * wave(30.0)));        // 0..100 % за 30 с
+    setExternalTemp(qRound(-20.0 + 50.0 * wave(60.0)));
+    setOdometer(123456 + static_cast<int>(t));       // +1 км в секунду
+    setGear(static_cast<int>(t / 3.0) % 5);          // P R N D M, по 3 с
+
+    // Сигнализаторы: 2 с горят, 2 с не горят.
+    const bool on = static_cast<int>(t / 2.0) % 2 == 0;
+    setAllTellTales(on);
+}
+
+void VehicleDataReceiver::setFlag(bool &field, bool value,
+                                  void (VehicleDataReceiver::*changed)())
+{
+    if (field == value) return;
+    field = value;
+    emit (this->*changed)();
+}
+
+void VehicleDataReceiver::setAllTellTales(bool on)
+{
+    setFlag(m_turnLeft,  on, &VehicleDataReceiver::turnLeftChanged);
+    setFlag(m_turnRight, on, &VehicleDataReceiver::turnRightChanged);
+    setFlag(m_highBeam,  on, &VehicleDataReceiver::highBeamChanged);
+    setFlag(m_lowBeam,   on, &VehicleDataReceiver::lowBeamChanged);
+    setFlag(m_position,  on, &VehicleDataReceiver::positionChanged);
+    setFlag(m_frontFog,  on, &VehicleDataReceiver::frontFogChanged);
+    setFlag(m_rearFog,   on, &VehicleDataReceiver::rearFogChanged);
+    setFlag(m_seatbelt,  on, &VehicleDataReceiver::seatbeltChanged);
+    setFlag(m_doorOpen,  on, &VehicleDataReceiver::doorOpenChanged);
+    setFlag(m_hoodOpen,  on, &VehicleDataReceiver::hoodOpenChanged);
+    setFlag(m_trunkOpen, on, &VehicleDataReceiver::trunkOpenChanged);
+
+    setFlag(m_checkEngine,   on, &VehicleDataReceiver::checkEngineChanged);
+    setFlag(m_oilPressure,   on, &VehicleDataReceiver::oilPressureChanged);
+    setFlag(m_overheat,      on, &VehicleDataReceiver::overheatChanged);
+    setFlag(m_absFault,      on, &VehicleDataReceiver::absFaultChanged);
+    setFlag(m_espActive,     on, &VehicleDataReceiver::espActiveChanged);
+    setFlag(m_espOff,        on, &VehicleDataReceiver::espOffChanged);
+    setFlag(m_brakeFault,    on, &VehicleDataReceiver::brakeFaultChanged);
+    setFlag(m_steeringFault, on, &VehicleDataReceiver::steeringFaultChanged);
+    setFlag(m_airbagFault,   on, &VehicleDataReceiver::airbagFaultChanged);
+    setFlag(m_battery,       on, &VehicleDataReceiver::batteryChanged);
+    setFlag(m_parkBrake,     on, &VehicleDataReceiver::parkBrakeChanged);
+    setFlag(m_pressBrake,    on, &VehicleDataReceiver::pressBrakeChanged);
+    setFlag(m_fuelLow,       on, &VehicleDataReceiver::fuelLowChanged);
 }
 
 void VehicleDataReceiver::requestData()

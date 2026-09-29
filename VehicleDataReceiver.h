@@ -1,14 +1,21 @@
 #ifndef VEHICLEDATARECEIVER_H
 #define VEHICLEDATARECEIVER_H
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QString>
 #include <QTimer>
 
-// Приёмник данных приборки. Опрашивает ESP32 по HTTP (/data),
-// разбирает плоский JSON со всеми сигналами CAN-матрицы Lada Vesta NG
-// и отдаёт их в QML как свойства объекта VehicleData.
+// Приёмник данных приборки. Отдаёт сигналы CAN-матрицы Lada Vesta NG
+// в QML как свойства объекта VehicleData.
+//
+// Источник данных выбирается переменной окружения VEHICLE_DATA_SOURCE:
+//   http (или не задана) - опрос ESP32 по HTTP (/data), плоский JSON;
+//   demo                 - синтетические данные: стрелки ходят по шкалам,
+//                          сигнализаторы мигают. Для проверки отрисовки
+//                          без реального автомобиля.
 class VehicleDataReceiver : public QObject
 {
     Q_OBJECT
@@ -53,6 +60,8 @@ class VehicleDataReceiver : public QObject
 
     // --- Связь ---
     Q_PROPERTY(bool connected   READ connected   NOTIFY connectedChanged)
+    // Имя активного источника для строки статуса: "ESP32" или "DEMO".
+    Q_PROPERTY(QString sourceName READ sourceName CONSTANT)
 
 public:
     explicit VehicleDataReceiver(QObject *parent = nullptr);
@@ -93,6 +102,7 @@ public:
     bool fuelLow()       const { return m_fuelLow; }
 
     bool connected() const { return m_connected; }
+    QString sourceName() const { return m_sourceName; }
 
 signals:
     void speedChanged();
@@ -133,10 +143,25 @@ signals:
     void connectedChanged();
 
 private slots:
+    // Источник http
     void requestData();
     void onReplyFinished(QNetworkReply *reply);
 
+    // Источник demo
+    void updateDemo();
+
 private:
+    // Запуск выбранного источника (вызывается из конструктора).
+    void startHttpSource();
+    void startDemoSource();
+
+    // Общий сеттер для сигнализатора: пишет поле и эмитит его сигнал,
+    // только если значение изменилось.
+    void setFlag(bool &field, bool value, void (VehicleDataReceiver::*changed)());
+
+    // Включить или выключить все сигнализаторы разом (для demo).
+    void setAllTellTales(bool on);
+
     // Сеттеры для значений (эмитят сигнал только при изменении).
     void setSpeed(int v);
     void setRpm(int v);
@@ -148,8 +173,15 @@ private:
     void setCruiseSpeed(int v);
     void setConnected(bool v);
 
+    QString m_sourceName;
+
+    // Источник http
     QNetworkAccessManager m_network;
     QTimer m_pollTimer;
+
+    // Источник demo
+    QTimer m_demoTimer;
+    QElapsedTimer m_demoClock;
 
     // Значения
     int m_speed        = 0;

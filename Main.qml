@@ -758,7 +758,7 @@ Window {
         }
     }
 
-    // Статус связи с ESP32 (HTTP)
+    // Статус источника данных (ESP32 по HTTP или DEMO)
         Text {
             z: 100
             anchors.left: parent.left
@@ -766,7 +766,8 @@ Window {
             anchors.margins: 10
             color: VehicleData.connected ? "#60d060" : "#e04040"
             font.pixelSize: 14
-            text: (VehicleData.connected ? "ESP32: связь есть" : "ESP32: нет связи")
+            text: VehicleData.sourceName
+                  + (VehicleData.connected ? ": связь есть" : ": нет связи")
                   + "  ·  скорость: " + VehicleData.speed + " км/ч"
         }
 }
