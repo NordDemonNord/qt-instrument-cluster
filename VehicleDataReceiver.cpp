@@ -1,4 +1,6 @@
 #include "VehicleDataReceiver.h"
+#include <QCanBus>
+#include <QCanBusFrame>
 #include <QDebug>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -18,6 +20,20 @@ constexpr int kNoDataU8  = 255;
 
 // Частота обновления demo-данных: ~30 кадров в секунду.
 constexpr int kDemoIntervalMs = 33;
+
+// --- Источник can ---
+// Интерфейс SocketCAN по умолчанию. Можно переопределить переменной
+// окружения VEHICLE_CAN_INTERFACE (например, vcan0 для тестов без железа).
+const QString kCanInterface = QStringLiteral("can0");
+
+// Кадр скорости: ID 0x1A0, 2 байта, uint16, 0.01 км/ч на бит, Motorola.
+constexpr quint32 kSpeedFrameId    = 0x1A0;
+constexpr int     kSpeedFrameLen   = 2;
+constexpr int     kSpeedRawPerKmh  = 100;   // 1 км/ч = 100 единиц сырого значения
+
+// Если кадров нет дольше этого времени - связь потеряна.
+// STM сейчас шлёт кадр раз в 500 мс, поэтому берём с запасом.
+constexpr int kCanTimeoutMs = 1000;
 }
 
 VehicleDataReceiver::VehicleDataReceiver(QObject *parent)
@@ -29,6 +45,8 @@ VehicleDataReceiver::VehicleDataReceiver(QObject *parent)
 
     if (source == QLatin1String("demo")) {
         startDemoSource();
+    } else if (source == QLatin1String("can")) {
+        startCanSource();
     } else {
         if (source != QLatin1String("http")) {
             qWarning() << "VehicleDataReceiver: unknown VEHICLE_DATA_SOURCE" << source
@@ -69,6 +87,125 @@ void VehicleDataReceiver::startDemoSource()
 
     qInfo() << "VehicleDataReceiver: source = demo, update every"
             << kDemoIntervalMs << "ms";
+}
+
+void VehicleDataReceiver::startCanSource()
+{
+    m_sourceName = QStringLiteral("CAN");
+
+    const QString interfaceName = qEnvironmentVariable("VEHICLE_CAN_INTERFACE", kCanInterface);
+
+    // QCanBus - фабрика: по имени плагина ("socketcan") создаёт объект
+    // устройства и отдаёт указатель на него. Если плагина нет (не установлен
+    // qtserialbus-plugins), вернёт nullptr и опишет причину в errorString.
+    QString errorString;
+    m_canDevice = QCanBus::instance()->createDevice(
+        QStringLiteral("socketcan"), interfaceName, &errorString);
+
+    if (!m_canDevice) {
+        qWarning() << "VehicleDataReceiver: cannot create CAN device:" << errorString;
+        return;   // связи нет, m_connected остаётся false
+    }
+
+    // Родитель - этот объект: Qt сам удалит устройство вместе с ним.
+    m_canDevice->setParent(this);
+
+    // Устройство подаёт сигнал framesReceived, когда в его очереди есть кадры.
+    connect(m_canDevice, &QCanBusDevice::framesReceived,
+            this, &VehicleDataReceiver::onCanFramesReceived);
+
+    connect(m_canDevice, &QCanBusDevice::errorOccurred,
+            this, [this](QCanBusDevice::CanBusError) {
+                // Пишем в лог только ошибки при живой связи, иначе при
+                // отсутствии can0 лог забьётся повторными попытками раз в секунду.
+                if (m_connected) {
+                    qWarning() << "VehicleDataReceiver: CAN error:" << m_canDevice->errorString();
+                }
+            });
+
+    // Сторож: однократный таймер, каждый пришедший кадр запускает его заново.
+    // Если он всё-таки сработал - кадров не было kCanTimeoutMs.
+    m_canWatchdog.setSingleShot(true);
+    m_canWatchdog.setInterval(kCanTimeoutMs);
+    connect(&m_canWatchdog, &QTimer::timeout,
+            this, &VehicleDataReceiver::onCanTimeout);
+
+    // Открыть сокет и привязать его к интерфейсу. Если can0 ещё нет
+    // (slcand не запущен), не страшно: сторож будет пробовать снова.
+    if (!m_canDevice->connectDevice()) {
+        qWarning() << "VehicleDataReceiver: cannot connect to" << interfaceName
+                   << ":" << m_canDevice->errorString() << "- will retry";
+    }
+
+    m_canWatchdog.start();
+
+    qInfo() << "VehicleDataReceiver: source = can, interface" << interfaceName
+            << ", speed frame ID" << Qt::hex << kSpeedFrameId
+            << Qt::dec << ", timeout" << kCanTimeoutMs << "ms";
+}
+
+void VehicleDataReceiver::onCanFramesReceived()
+{
+    // Забрать из очереди все накопившиеся кадры разом.
+    const QList<QCanBusFrame> frames = m_canDevice->readAllFrames();
+
+    for (const QCanBusFrame &frame : frames) {
+        // Пропускаем служебные кадры (ошибки шины, remote-запросы)
+        // и кадры с расширенным 29-битным ID.
+        if (!frame.isValid()
+            || frame.frameType() != QCanBusFrame::DataFrame
+            || frame.hasExtendedFrameFormat()) {
+            continue;
+        }
+
+        // Любой нормальный кадр значит, что связь есть: сбросить сторожа.
+        setConnected(true);
+        m_canWatchdog.start();
+
+        if (frame.frameId() == kSpeedFrameId) {
+            const QByteArray data = frame.payload();
+            if (data.size() != kSpeedFrameLen) {
+                qWarning() << "VehicleDataReceiver: speed frame with DLC" << data.size()
+                           << "instead of" << kSpeedFrameLen;
+                continue;
+            }
+
+            // QByteArray хранит char. На x86 char знаковый: байт 0xE0 был бы -32.
+            // Поэтому сначала приводим каждый байт к беззнаковому quint8.
+            const quint8 high = static_cast<quint8>(data[0]);   // Motorola: старший байт первым
+            const quint8 low  = static_cast<quint8>(data[1]);
+            const quint16 raw = static_cast<quint16>((high << 8) | low);
+
+            // Сырое значение в сотых км/ч -> целые км/ч с округлением.
+            setSpeed(qRound(static_cast<double>(raw) / kSpeedRawPerKmh));
+        }
+        // Остальные ID пока не разбираем.
+    }
+}
+
+void VehicleDataReceiver::onCanTimeout()
+{
+    // Кадров нет kCanTimeoutMs. Как в настоящей приборке: стрелку в ноль,
+    // индикатор "нет связи". Выдуманные данные при потере связи не показываем.
+    if (m_connected) {
+        qWarning() << "VehicleDataReceiver: no CAN frames for" << kCanTimeoutMs << "ms";
+    }
+    setConnected(false);
+    setSpeed(0);
+
+    // Переподключиться: если slcand перезапустили, can0 создан заново,
+    // и старый сокет к нему уже не привязан.
+    // disconnectDevice/connectDevice ругаются в лог, если вызвать их не в том
+    // состоянии, поэтому сначала проверяем state().
+    if (m_canDevice->state() == QCanBusDevice::ConnectedState) {
+        m_canDevice->disconnectDevice();
+    }
+    if (m_canDevice->state() == QCanBusDevice::UnconnectedState) {
+        m_canDevice->connectDevice();
+    }
+
+    // Проверить снова через kCanTimeoutMs.
+    m_canWatchdog.start();
 }
 
 void VehicleDataReceiver::updateDemo()

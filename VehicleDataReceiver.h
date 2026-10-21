@@ -7,6 +7,7 @@
 #include <QNetworkReply>
 #include <QString>
 #include <QTimer>
+#include <QCanBusDevice>
 
 // Приёмник данных приборки. Отдаёт сигналы CAN-матрицы Lada Vesta NG
 // в QML как свойства объекта VehicleData.
@@ -15,7 +16,11 @@
 //   http (или не задана) - опрос ESP32 по HTTP (/data), плоский JSON;
 //   demo                 - синтетические данные: стрелки ходят по шкалам,
 //                          сигнализаторы мигают. Для проверки отрисовки
-//                          без реального автомобиля.
+//                          без реального автомобиля;
+//   can                  - SocketCAN, интерфейс can0. Кадр 0x1A0: скорость,
+//                          uint16, 0.01 км/ч на бит, Motorola (старший байт
+//                          первым). Что под can0 (slcand, CANable, CAN-контроллер),
+//                          приложению неважно.
 class VehicleDataReceiver : public QObject
 {
     Q_OBJECT
@@ -63,7 +68,7 @@ class VehicleDataReceiver : public QObject
 
     // --- Связь ---
     Q_PROPERTY(bool connected   READ connected   NOTIFY connectedChanged)
-    // Имя активного источника для строки статуса: "ESP32" или "DEMO".
+    // Имя активного источника для строки статуса: "ESP32", "CAN" или "DEMO".
     Q_PROPERTY(QString sourceName READ sourceName CONSTANT)
 
 public:
@@ -159,10 +164,16 @@ private slots:
     // Источник demo
     void updateDemo();
 
+    // Источник can: пришли кадры
+    void onCanFramesReceived();
+    // Источник can: кадров нет дольше таймаута - связь потеряна
+    void onCanTimeout();
+
 private:
     // Запуск выбранного источника (вызывается из конструктора).
     void startHttpSource();
     void startDemoSource();
+    void startCanSource();
 
     // Общий сеттер для сигнализатора: пишет поле и эмитит его сигнал,
     // только если значение изменилось.
@@ -193,6 +204,10 @@ private:
     // Источник demo
     QTimer m_demoTimer;
     QElapsedTimer m_demoClock;
+
+    // Источник can (SocketCAN, интерфейс can0)
+    QCanBusDevice *m_canDevice = nullptr;   // создаёт фабрика QCanBus
+    QTimer m_canWatchdog;
 
     // Значения
     int m_speed        = 0;
